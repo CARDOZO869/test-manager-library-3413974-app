@@ -1,4 +1,4 @@
-export const SESSION_KEYS = ['token', 'role', 'expiresAt'];
+export const SESSION_KEYS = ['token', 'role', 'expiresAt', 'username'];
 export const clearSession = () => SESSION_KEYS.forEach(key => localStorage.removeItem(key));
 
 export function parseSession(payload, now = Date.now()) {
@@ -16,5 +16,5 @@ export function readSession() {
   const role = localStorage.getItem('role');
   const expiresAt = Number(localStorage.getItem('expiresAt'));
   return token && ['admin', 'librarian'].includes(role) && Number.isFinite(expiresAt) && expiresAt > Date.now()
-    ? { token, role, expiresAt } : null;
+    ? { token, role, expiresAt, username: localStorage.getItem('username') || '' } : null;
 }

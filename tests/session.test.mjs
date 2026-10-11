@@ -17,6 +17,8 @@ test('expired and incomplete persisted sessions are rejected and logout clears o
   globalThis.localStorage = { getItem: key => values.get(key) ?? null, removeItem: key => values.delete(key) };
   t.mock.method(Date, 'now', () => 10000);
   assert.equal(readSession().role, 'admin');
+  values.set('username', 'bibliotecario-demo');
+  assert.equal(readSession().username, 'bibliotecario-demo');
   values.set('expiresAt', '9000'); assert.equal(readSession(), null);
   values.set('expiresAt', '11000'); values.set('role', 'student'); assert.equal(readSession(), null);
   clearSession(); assert.deepEqual([...values], [['preference', 'keep']]);

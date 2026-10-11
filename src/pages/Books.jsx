@@ -1,208 +1,76 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import { useCollection } from '../services/useCollection';
 import { BookCover } from '../components/BookCover';
 import { ResourceStatus } from '../components/ResourceStatus';
+import { Pagination } from '../components/Pagination';
 import { useAuth } from '../contexts/useAuth';
+import { Icon } from '../components/Icon';
+
+const emptyForm = { title: '', author: '', isbn: '', total_copies: 1, category_id: '' };
 
 export const Books = () => {
   const [categories, setCategories] = useState([]);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
+  const [availability, setAvailability] = useState('');
   const [page, setPage] = useState(1);
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ title: '', author: '', isbn: '', total_copies: 1, category_id: '' });
+  const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState('');
   const [detail, setDetail] = useState(null);
-
-  const { data: { items: books }, error, setError, loading, reload: fetchBooks, totalPages } = useCollection('/books', { page, q: search || undefined, category_id: category || undefined });
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const { data: { items: books, total }, error, setError, loading, reload, totalPages } = useCollection('/books', { page, size: 20, q: search || undefined, category_id: category || undefined });
 
   useEffect(() => {
-    api.get('/categories').then(res => setCategories(res.data.data || res.data)).catch(err => setError(err.response?.data?.message || 'No se pudo cargar la información.'));
+    const controller = new AbortController();
+    api.get('/categories', { signal: controller.signal }).then(res => setCategories(res.data.data || res.data)).catch(err => {
+      if (!controller.signal.aborted) setError(err.response?.data?.message || 'No se pudieron cargar las categorías.');
+    });
+    return () => controller.abort();
   }, [setError]);
 
-
-
-  const openCreate = () => {
-    setEditing(null);
-    setForm({ title: '', author: '', isbn: '', total_copies: 1, category_id: categories[0]?.id || '' });
-    setFormError('');
-    setShowForm(true);
-  };
-
-  const openEdit = (book) => {
-    setEditing(book);
-    setForm({
-      title: book.title,
-      author: book.author,
-      isbn: book.isbn,
-      total_copies: book.total_copies,
-      category_id: book.category_id || book.category?.id || ''
-    });
-    setFormError('');
-    setShowForm(true);
-  };
-
-  const handleSave = async (e) => {
-    e.preventDefault();
-    setFormError('');
+  const visibleBooks = useMemo(() => books.filter(book => availability === 'available' ? book.available_copies > 0 : availability === 'unavailable' ? book.available_copies === 0 : true), [books, availability]);
+  const openCreate = () => { setEditing(null); setForm({ ...emptyForm, category_id: categories[0]?.id || '' }); setFormError(''); setShowForm(true); };
+  const openEdit = book => { setEditing(book); setForm({ title: book.title, author: book.author, isbn: book.isbn, total_copies: book.total_copies, category_id: book.category_id || book.category?.id || '' }); setFormError(''); setShowForm(true); };
+  const saveBook = async event => {
+    event.preventDefault(); setFormError('');
     try {
-      if (editing) {
-        await api.put(`/books/${editing.id}`, form);
-      } else {
-        await api.post('/books', form);
-      }
-      setShowForm(false);
-      fetchBooks();
-    } catch (err) {
-      const msg = err.response?.data?.error?.message || err.response?.data?.message || 'No se pudo guardar el libro';
-      setFormError(msg);
-    }
+      if (editing) await api.put(`/books/${editing.id}`, form); else await api.post('/books', form);
+      setShowForm(false); reload();
+    } catch (err) { setFormError(err.response?.data?.error?.message || err.response?.data?.message || 'No se pudo guardar el libro.'); }
+  };
+  const removeBook = async () => {
+    try { await api.delete(`/books/${pendingDelete.id}`); setPendingDelete(null); if (detail?.id === pendingDelete.id) setDetail(null); reload(); }
+    catch (err) { setError(err.response?.data?.error?.message || err.response?.data?.message || 'No se pudo dar de baja el libro.'); setPendingDelete(null); }
+  };
+  const viewDetail = async book => {
+    try { const res = await api.get(`/books/${book.id}`); setDetail(res.data.data || res.data); setError(''); }
+    catch (err) { setError(err.response?.data?.message || 'No se pudo cargar el libro.'); }
   };
 
-  const handleDelete = async (book) => {
-    if (!confirm(`¿Dar de baja «${book.title}»?`)) return;
-    try {
-      await api.delete(`/books/${book.id}`);
-      fetchBooks();
-    } catch (err) {
-      const msg = err.response?.data?.error?.message || err.response?.data?.message || 'No se pudo dar de baja el libro';
-      alert(msg);
-    }
-  };
+  if (detail) return <div className="catalog-page"><button className="button button--secondary" onClick={() => setDetail(null)}>← Volver al catálogo</button><ResourceStatus error={error} loading={loading}/><section className="detail-layout panel" style={{ marginTop: 16 }}><div className="detail-cover-panel"><BookCover book={detail} isAdmin={isAdmin} onChange={() => viewDetail(detail)}/></div><div className="detail-copy"><span className="eyebrow">DETALLE DEL LIBRO</span><h2>{detail.title}</h2><p>por {detail.author}</p><div className="detail-meta-grid"><div className="detail-meta"><span>ISBN</span><strong>{detail.isbn}</strong></div><div className="detail-meta"><span>Categoría</span><strong>{detail.category?.name || 'Sin categoría'}</strong></div><div className="detail-meta"><span>Ejemplares en colección</span><strong>{detail.total_copies}</strong></div><div className="detail-meta"><span>Disponibilidad</span><strong>{detail.available_copies} de {detail.total_copies} disponibles</strong></div></div>{isAdmin && <div className="inline-filter-row"><button className="button button--secondary" onClick={() => openEdit(detail)}>Editar información</button><button className="button button--danger" onClick={() => setPendingDelete(detail)}>Dar de baja</button></div>}</div></section>{pendingDelete && <ConfirmDialog book={pendingDelete} onCancel={() => setPendingDelete(null)} onConfirm={removeBook}/>}</div>;
 
-  const viewDetail = async (id) => {
-    try {
-      const res = await api.get(`/books/${id}`);
-      setDetail(res.data.data || res.data);
-    } catch (err) {
-      setError(err.response?.data?.message || 'No se pudo cargar la información.');
-    }
-  };
-
-  if (detail) {
-    return (
-      <div>
-        <button onClick={() => setDetail(null)} className="mb-4 text-blue-600 hover:underline">&larr; Volver al catálogo</button>
-        <div className="bg-white p-6 rounded shadow">
-          <ResourceStatus error={error} loading={loading} />
-        <h1 className="text-3xl font-bold mb-4">{detail.title}</h1>
-          <BookCover book={detail} isAdmin={isAdmin} onChange={() => viewDetail(detail.id)} />
-          <p className="text-gray-600 text-lg mb-2">Autor: {detail.author}</p>
-          <div className="grid grid-cols-2 gap-4 mt-4">
-            <div><span className="font-semibold">ISBN:</span> {detail.isbn}</div>
-            <div><span className="font-semibold">Categoría:</span> {detail.category?.name || 'N/A'}</div>
-            <div><span className="font-semibold">Total de ejemplares:</span> {detail.total_copies}</div>
-            <div><span className="font-semibold">Disponibles:</span> {detail.available_copies}</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <ResourceStatus error={error} loading={loading} />
-        <h1 className="text-3xl font-bold">Catálogo de libros</h1>
-        {isAdmin && <button onClick={openCreate} className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">Nuevo libro</button>}
-      </div>
-
-      <div className="flex flex-wrap gap-4 mb-6">
-        <input
-          type="text"
-          placeholder="Buscar…"
-          className="border p-2 rounded flex-1"
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1); }}
-        />
-        <select
-          className="border p-2 rounded w-48"
-          value={category}
-          onChange={e => { setCategory(e.target.value); setPage(1); }}
-        >
-          <option value="">Todas las categorías</option>
-          {categories.map(c => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-      </div>
-
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded shadow-lg w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">{editing ? 'Editar libro' : 'Nuevo libro'}</h2>
-            {formError && <div className="bg-red-100 text-red-700 p-2 rounded mb-4">{formError}</div>}
-            <form onSubmit={handleSave} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Título</label>
-                <input type="text" required className="mt-1 block w-full border border-gray-300 rounded p-2" value={form.title} onChange={e => setForm({...form, title: e.target.value})} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Autor</label>
-                <input type="text" required className="mt-1 block w-full border border-gray-300 rounded p-2" value={form.author} onChange={e => setForm({...form, author: e.target.value})} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">ISBN (13 dígitos)</label>
-                <input type="text" pattern="[0-9]{13}" disabled={!!editing} required className="mt-1 block w-full border border-gray-300 rounded p-2" value={form.isbn} onChange={e => setForm({...form, isbn: e.target.value})} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Total de ejemplares</label>
-                <input type="number" min="1" required className="mt-1 block w-full border border-gray-300 rounded p-2" value={form.total_copies} onChange={e => setForm({...form, total_copies: parseInt(e.target.value)})} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Categoría</label>
-                <select required className="mt-1 block w-full border border-gray-300 rounded p-2" value={form.category_id} onChange={e => setForm({...form, category_id: e.target.value})}>
-                  <option value="">Selecciona…</option>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div className="flex gap-2">
-                <button type="submit" className="flex-1 bg-blue-600 text-white p-2 rounded hover:bg-blue-700">Guardar</button>
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 bg-gray-300 text-gray-700 p-2 rounded hover:bg-gray-400">Cancelar</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {books.map(b => (
-          <div key={b.id} className="bg-white p-4 rounded shadow flex flex-col">
-            <h3><button className="font-bold text-lg text-left hover:text-blue-600" onClick={() => viewDetail(b.id)}>{b.title}</button></h3>
-            <p className="text-gray-600">{b.author}</p>
-            <p className="text-sm text-gray-500 mt-2">ISBN: {b.isbn}</p>
-            <p className="text-sm text-gray-500">Disponibles: {b.available_copies} / {b.total_copies}</p>
-            <p className="text-sm text-gray-500">Categoría: {b.category?.name || 'N/A'}</p>
-            {isAdmin && (
-              <div className="mt-4 flex gap-2">
-                <button onClick={() => openEdit(b)} className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600">Editar</button>
-                <button onClick={() => handleDelete(b)} className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600">Dar de baja</button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {books.length === 0 && !loading && !error && <p className="text-center text-gray-500 mt-8">No se encontraron libros.</p>}
-
-      <div className="mt-6 flex justify-between items-center">
-        <button
-          disabled={page === 1}
-          onClick={() => setPage(p => p - 1)}
-          className="bg-gray-300 px-4 py-2 rounded disabled:opacity-50"
-        >Anterior</button>
-        <span>Página {page} de {totalPages}</span>
-        <button
-          disabled={page >= totalPages}
-          onClick={() => setPage(p => p + 1)}
-          className="bg-gray-300 px-4 py-2 rounded disabled:opacity-50"
-        >Siguiente</button>
-      </div>
-    </div>
-  );
+  return <div className="catalog-page">
+    <div className="page-heading"><div><span className="eyebrow">COLECCIÓN</span><h1>Catálogo de libros</h1><p>Encuentra un título o explora lo que tenemos en estantería.</p></div>{isAdmin && <button className="button button--primary" onClick={openCreate}><Icon name="plus" size={17}/>Añadir libro</button>}</div>
+    <ResourceStatus error={error} loading={loading}/>
+    <div className="collection-toolbar"><div className="search-field"><Icon name="search" size={17}/><input className="input" type="search" aria-label="Buscar libros" placeholder="Buscar por título o autor…" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }}/></div><select className="select-input" aria-label="Filtrar por categoría" value={category} onChange={event => { setCategory(event.target.value); setPage(1); }}><option value="">Todas las categorías</option>{categories.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select className="select-input" aria-label="Filtrar por disponibilidad" value={availability} onChange={event => setAvailability(event.target.value)}><option value="">Toda disponibilidad</option><option value="available">Con ejemplares</option><option value="unavailable">Agotados en esta página</option></select></div>
+    <p className="results-meta">{visibleBooks.length ? `Mostrando ${visibleBooks.length} títulos en esta página · ${Number(total || 0).toLocaleString('es-CO')} en el catálogo` : loading ? 'Cargando catálogo…' : 'No hay títulos que coincidan con estos filtros.'}</p>
+    {visibleBooks.length ? <div className="book-grid">{visibleBooks.map(book => <article className="book-card" key={book.id}>
+      <div className="book-card-cover"><span className={`availability-pill${book.available_copies === 0 ? ' availability-pill--none' : ''}`}>{book.available_copies > 0 ? `${book.available_copies} disponible${book.available_copies === 1 ? '' : 's'}` : 'Sin ejemplares'}</span><BookCover compact book={book}/></div>
+      <div className="book-card-body"><span className="book-card-category">{book.category?.name || 'Colección'}</span><h2 className="book-card-title">{book.title}</h2><p className="book-card-author">{book.author}</p><p className="book-card-isbn">ISBN {book.isbn} · {book.total_copies} ejemplar{book.total_copies === 1 ? '' : 'es'}</p>
+        <div className="book-card-footer"><button className="button button--secondary button--small" onClick={() => viewDetail(book)}>Ver detalles</button>{isAdmin && <button className="button button--quiet button--small" onClick={() => openEdit(book)}>Editar</button>}</div>
+      </div></article>)}</div> : !loading && <div className="panel empty-state"><span className="empty-icon"><Icon name="book"/></span><strong>No encontramos libros</strong><span>Prueba otra búsqueda o cambia los filtros.</span>{search || category || availability ? <button className="button button--secondary" onClick={() => { setSearch(''); setCategory(''); setAvailability(''); setPage(1); }}>Limpiar filtros</button> : isAdmin && <button className="button button--primary" onClick={openCreate}><Icon name="plus" size={16}/>Añadir el primer libro</button>}</div>}
+    <Pagination page={page} totalPages={totalPages} onChange={setPage}/>
+    {showForm && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setShowForm(false); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="book-form-title"><div className="modal-header"><div><span className="eyebrow">CATÁLOGO</span><h2 id="book-form-title">{editing ? 'Editar libro' : 'Añadir un libro'}</h2><p>Registra la información de la colección.</p></div><button className="modal-close" aria-label="Cerrar" onClick={() => setShowForm(false)}><Icon name="close" size={17}/></button></div>{formError && <p className="form-error" role="alert">{formError}</p>}<form className="form-grid" onSubmit={saveBook}>
+      <Field label="Título"><input className="input" required maxLength="180" value={form.title} onChange={event => setForm({ ...form, title: event.target.value })}/></Field><Field label="Autor"><input className="input" required maxLength="180" value={form.author} onChange={event => setForm({ ...form, author: event.target.value })}/></Field><Field label="ISBN"><input className="input" required pattern="[0-9]{13}" disabled={Boolean(editing)} value={form.isbn} onChange={event => setForm({ ...form, isbn: event.target.value })}/></Field><Field label="Total de ejemplares"><input className="input" required type="number" min="1" value={form.total_copies} onChange={event => setForm({ ...form, total_copies: Number(event.target.value) })}/></Field><Field label="Categoría"><select className="select-input" required value={form.category_id} onChange={event => setForm({ ...form, category_id: event.target.value })}><option value="">Selecciona una categoría</option>{categories.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setShowForm(false)}>Cancelar</button><button className="button button--primary" type="submit">{editing ? 'Guardar cambios' : 'Guardar libro'}</button></div>
+    </form></section></div>}
+    {pendingDelete && <ConfirmDialog book={pendingDelete} onCancel={() => setPendingDelete(null)} onConfirm={removeBook}/>}
+  </div>;
 };
+
+function Field({ label, children }) { return <div className="form-field"><label>{label}</label>{children}</div>; }
+function ConfirmDialog({ book, onCancel, onConfirm }) { return <div className="modal-backdrop"><section className="modal modal--narrow" role="alertdialog" aria-modal="true" aria-labelledby="delete-book-title"><span className="stat-icon stat-icon--amber" style={{ position: 'static', marginBottom: 14 }}><Icon name="book" size={18}/></span><div className="modal-header"><div><span className="eyebrow">CONFIRMACIÓN</span><h2 id="delete-book-title">¿Dar de baja este libro?</h2><p>“{book.title}” dejará de aparecer en el catálogo. Los préstamos históricos se conservan.</p></div></div><div className="modal-actions"><button className="button button--secondary" onClick={onCancel}>Cancelar</button><button className="button button--danger" onClick={onConfirm}>Confirmar baja</button></div></section></div>; }

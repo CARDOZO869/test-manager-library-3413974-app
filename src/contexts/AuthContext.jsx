@@ -5,7 +5,7 @@ import { clearSession, parseSession, readSession } from '../services/session';
 
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => { const session = readSession(); return session ? { role: session.role } : null; });
+  const [user, setUser] = useState(() => { const session = readSession(); return session ? { role: session.role, username: session.username } : null; });
   const loading = false;
   const [expiresAt, setExpiresAt] = useState(() => readSession()?.expiresAt ?? null);
 
@@ -14,7 +14,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const sync = () => {
       const session = readSession();
-      setUser(session ? { role: session.role } : null);
+      setUser(session ? { role: session.role, username: session.username } : null);
       setExpiresAt(session?.expiresAt ?? null);
       if (!session) clearSession();
     };
@@ -36,8 +36,9 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('token', token);
     localStorage.setItem('role', role);
     localStorage.setItem('expiresAt', String(expiry));
+    localStorage.setItem('username', username.trim());
     setExpiresAt(expiry);
-    setUser({ role });
+    setUser({ role, username: username.trim() });
   };
 
   const logout = () => { clearSession(); setUser(null); setExpiresAt(null); };
