@@ -1,5 +1,9 @@
 # test-manager-library-3413974-app
 
+Implementación local: React 19, Vite 8, Axios y Tailwind 4. Entrada activa: src/main.jsx; src/ contiene las páginas y servicios reales. Duplicados antiguos conservados fuera del repositorio en ../backups/react-duplicates-20261010. Arranque integrado desde infra con Start-Library.ps1, app http://localhost:5173. API mediante proxy /api/v1; configurar API_PROXY_TARGET solo para desarrollo externo a Compose. Comprobaciones: `npm test`, `npm run lint`, `npm run build`. [Resultados y evidencias](../test-manager-library-3413974-docs/implementation-laravel-react/FINAL-REPORT.md).
+
+Las instrucciones originales siguientes se conservan como contexto histórico del reto.
+
 > **Prueba técnica · Ficha ADSO 3413974**
 > Horario: de **9:15 a. m. a 3:00 p. m.** (15:00). Después, **feria de presentación** de cada proyecto.
 
