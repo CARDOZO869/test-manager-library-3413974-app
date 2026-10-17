@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { clearSession } from './session';
 
-// Usar el proxy de Vite evita depender del puerto publicado por Docker.
+// Use the Vite proxy to avoid depending on Docker's published port.
 const api = axios.create({
   baseURL: '/api/v1',
   headers: { Accept: 'application/json' },
